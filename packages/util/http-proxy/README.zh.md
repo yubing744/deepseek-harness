@@ -36,12 +36,17 @@ kind: "package-reference"
 | 普通请求，或最终落到 `globalThis.fetch` 的 SDK | 什么都不用——全局 dispatcher 已经在路由它 |
 | 需要按“这次请求是否走代理”分支的调用 | `proxyRouteFor(url)` |
 | 接受自有代理 URL 的 SDK | `proxyRouteFor(url)`，把 `route.proxy` 传进去 |
+| SDK 接受 `fetch`，且请求需要特定 Undici 超时 | `createRequestFetch({ headersTimeout, bodyTimeout })`，请求结束后关闭它 |
 | 由你自己构造环境的 spawn | 把 `proxyEnvironmentForChild()` 应用到该 spawn（`undefined` 表示删除） |
 | 必须连到自带 fixture（测试前置数据）服务器的 harness | 把 `clearedProxyEnv()` 应用到该 spawn |
 
 `proxyRouteFor` 给出的不只是答案，还有该答案所假定的传输：走代理的那一支携带着此刻正按该策略路由的 dispatcher。若调用方先读策略、再自建传输，卸载就可能落在两次读取之间，把请求发往其分支从未放行的去处。
 
 构造 `new Agent(...)` 再作为 `dispatcher` 传入会覆盖全局 dispatcher，从而静默绕开代理。`verify-no-bare-dispatcher` 会在本包之外拒绝该写法。确实自有传输的调用点（因为它携带进程级 dispatcher 无法承载的单次请求状态）要在该行用 `proxy-exempt:` 注释说明。
+
+### 为 SDK 设置请求级超时
+
+`createRequestFetch()` 创建一个使用调用时已安装策略的独立 Undici dispatcher。把它的 `fetch` 传给接受 fetch override 的 SDK，并在 SDK 请求完成或中止后调用 `close()`。`headersTimeout` 限制等待首个响应头的时间，`bodyTimeout` 限制响应体暂停的时间。此 helper 不改变进程级 dispatcher，同时保留普通 fetch 的直连、代理和绕过决策。
 
 该门禁看不进 SDK 内部，因此每个出网点都配有 `egress.spec.ts`，通过假代理驱动实际传输并检查观察到的路由。每个新的出网点必须包含该传输测试。遥测断言其直连例外。这些测试可发现调用点不变但依赖变更改变路由的情况。
 

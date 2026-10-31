@@ -86,9 +86,13 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `requestImagePixelBudget` | `4,194,304` | Total-pixel budget for each deterministic request image |
 | `requestImageMaxBytes` | `1 MiB` | Encoded-byte target for each request image before base64 expansion |
 | `maxRequestImageBytes` | `20 MiB` | Aggregate base64 image-payload bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED` |
+| `timeoutMs` | absent | SDK timeout and the maximum wait for response headers; when set, the adapter gives pi-ai a request-local fetch with this header timeout |
+| `streamIdleTimeoutMs` | `300,000` ms | Maximum idle time between provider stream data; also the request-local fetch body timeout when `timeoutMs` is set |
 | `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-pi-ai) is the exhaustive source for every accepted field and its JSDoc.
+
+For a long prompt prefill, set `timeoutMs` at least as high as the expected wait for first response headers. A configured value also overrides Undici's default header deadline, so the adapter and the socket transport share one request budget. The request retains the profile's proxy policy and closes its private dispatcher when the stream completes or stops.
 
 ### Sign in to a provider
 

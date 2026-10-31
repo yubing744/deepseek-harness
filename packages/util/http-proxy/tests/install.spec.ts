@@ -5,6 +5,7 @@ import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest'
 import { getGlobalDispatcher } from 'undici'
 import {
   clearedProxyEnv,
+  createRequestFetch,
   installProxyFromEnvironment,
   proxyEnvironmentForChild,
   proxyRouteFor,
@@ -45,7 +46,13 @@ beforeAll(async () => {
     proxied.push(`CONNECT ${request.url ?? ''}`)
     socket.end()
   })
-  origin = createServer((_request, response) => { response.end('DIRECT') })
+  origin = createServer((request, response) => {
+    if (request.url === '/slow-headers') {
+      setTimeout(() => { response.end('LATE') }, 1_500)
+      return
+    }
+    response.end('DIRECT')
+  })
   const [proxyAddress, originAddress] = await Promise.all([listen(proxy), listen(origin)])
   proxyUrl = `http://127.0.0.1:${String(proxyAddress.port)}`
   originUrl = `http://127.0.0.1:${String(originAddress.port)}/probe`
@@ -240,6 +247,29 @@ describe('proxyRouteFor', () => {
       expect(proxyRouteFor(new URL(originUrl))).toEqual({ proxied: false })
     } finally {
       await dispose()
+    }
+  })
+})
+
+describe('createRequestFetch', () => {
+  it('routes a request-scoped fetch through the active proxy policy', async () => {
+    const { dispose } = await install(proxyAll())
+    const request = await createRequestFetch({ headersTimeout: 1_000, bodyTimeout: 1_000 })
+    try {
+      await expect((await request.fetch(proxyTarget)).text()).resolves.toBe('VIA-PROXY')
+      expect(proxied).toEqual([`GET ${proxyTarget}`])
+    } finally {
+      await request.close()
+      await dispose()
+    }
+  })
+
+  it('uses its header timeout instead of the process-wide undici default', async () => {
+    const request = await createRequestFetch({ headersTimeout: 1_000, bodyTimeout: 3_000 })
+    try {
+      await expect(request.fetch(originUrl.replace('/probe', '/slow-headers'))).rejects.toMatchObject({ cause: { code: 'UND_ERR_HEADERS_TIMEOUT' } })
+    } finally {
+      await request.close()
     }
   })
 })

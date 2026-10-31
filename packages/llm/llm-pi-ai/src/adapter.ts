@@ -44,6 +44,7 @@ import {
   LlmError,
   ReasoningEffortId,
 } from '@deepseek-ai/dsh-llm'
+import { createRequestFetch, type RequestFetch } from '@deepseek-ai/dsh-http-proxy'
 import type {
   GenerateOptions,
   ImageAttachmentAccess,
@@ -431,8 +432,15 @@ export class PiAiAdapter extends LlmAdapter {
       : AbortSignal.any([options.signal, consumer.signal])
     const streamIdleTimeoutMs = profile.streamIdleTimeoutMs
     using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
+    let requestFetch: RequestFetch | undefined
 
     try {
+      requestFetch = profile.timeoutMs === undefined
+        ? undefined
+        : await createRequestFetch({
+          headersTimeout: profile.timeoutMs,
+          bodyTimeout: streamIdleTimeoutMs,
+        })
       const containsImage = options.messages.some(message => contentHasImage(message.content))
       if (containsImage && !model.input.includes('image')) {
         throw new LlmError(`pi-ai model "${model.id}" does not support image input`, 'UNSUPPORTED_CONTENT')
@@ -460,6 +468,7 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+        ...requestFetch === undefined ? {} : { fetch: requestFetch.fetch },
         signal: watchdog.signal,
         headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
       })
@@ -493,6 +502,7 @@ export class PiAiAdapter extends LlmAdapter {
       throw error
     } finally {
       consumer.abort('pi-ai stream consumer stopped')
+      await requestFetch?.close()
     }
   }
 }

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 
 const streamSimple = vi.hoisted(() => vi.fn())
+const closeRequestFetch = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+const createRequestFetch = vi.hoisted(() => vi.fn())
 
 // A hand-declared route is built by `createProvider` over the protocol table in
 // `src/provider.ts`, so the table's lazy api module is the SDK boundary this
@@ -11,20 +13,27 @@ vi.mock('@earendil-works/pi-ai/api/openai-completions.lazy', () => ({
   openAICompletionsApi: () => ({ stream: streamSimple, streamSimple }),
 }))
 
+vi.mock('@deepseek-ai/dsh-http-proxy', () => ({ createRequestFetch }))
+
 import { PiAiAdapter } from '../src/adapter.ts'
 import { resolveProfiles } from '../src/config.ts'
 import { memoryAuth } from './auth-double.ts'
 
-afterEach(() => { streamSimple.mockReset() })
+afterEach(() => {
+  streamSimple.mockReset()
+  createRequestFetch.mockReset()
+  closeRequestFetch.mockReset()
+})
 
 /** A hand-declared OpenAI-compatible route with one fully described model. */
-function gatewayAdapter(): PiAiAdapter {
+function gatewayAdapter(timeoutMs?: number): PiAiAdapter {
   return new PiAiAdapter({
     profiles: () => resolveProfiles({
       'local-gateway': {
         api: 'openai-completions',
         baseURL: 'http://127.0.0.1:9/v1',
         models: [{ id: 'local-model', contextWindow: 8192, maxTokens: 1024 }],
+        ...timeoutMs === undefined ? {} : { timeoutMs },
       },
     }),
     resolveApiKey: () => Promise.resolve('test-key'),
@@ -50,6 +59,7 @@ describe('pi-ai SDK retry boundary', () => {
 
     expect(streamSimple).toHaveBeenCalledOnce()
     expect(streamSimple.mock.calls[0]?.[2]).toMatchObject({ maxRetries: 0, apiKey: 'test-key' })
+    expect(createRequestFetch).not.toHaveBeenCalled()
     // pi-ai reports a setup failure as a terminal in-stream error rather than
     // throwing, which the converter turns into the harness error finish.
     expect(chunks.at(-1)).toMatchObject({
@@ -71,5 +81,17 @@ describe('pi-ai SDK retry boundary', () => {
       contextWindow: 8192,
       maxTokens: 1024,
     })
+  })
+
+  it('uses a request-local fetch whose transport timeouts match a configured SDK timeout', async () => {
+    const timedFetch = vi.fn()
+    createRequestFetch.mockResolvedValue({ fetch: timedFetch, close: closeRequestFetch })
+    streamSimple.mockImplementation(() => { throw new Error('mock SDK boundary') })
+
+    await drain(gatewayAdapter(5000))
+
+    expect(createRequestFetch).toHaveBeenCalledWith({ headersTimeout: 5000, bodyTimeout: 300_000 })
+    expect(streamSimple.mock.calls[0]?.[2]).toMatchObject({ fetch: timedFetch })
+    expect(closeRequestFetch).toHaveBeenCalledOnce()
   })
 })
