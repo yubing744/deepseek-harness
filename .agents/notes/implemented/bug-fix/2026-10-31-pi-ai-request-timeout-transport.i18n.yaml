@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-31-pi-ai-request-timeout-transport.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-31-pi-ai-request-timeout-transport.md
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline:
+  en: 83f9651a706fa226
+  zh: f5064828a1e53269
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline/problem:
+  en: e1d9d1f37875724a
+  zh: 9ab7abf100891c2c
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline/decision:
+  en: a23ac716c24f8e99
+  zh: 6b06b549b93cf3f0
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline/alternatives-considered:
+  en: ac05439fa97a96f4
+  zh: 55957c20bdb8c6f6
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline/consequences:
+  en: 395e696d87c0723e
+  zh: 58c722ec325fb3a0
+/agent-note-pi-ai-request-timeouts-own-their-transport-deadline/testing:
+  en: acbebc7311b574b9
+  zh: b5e6d5431da864ab

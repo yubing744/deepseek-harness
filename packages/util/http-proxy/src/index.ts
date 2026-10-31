@@ -16,8 +16,10 @@
 
 export {
   clearedProxyEnv,
+  createRequestFetch,
   installProxyFromEnvironment,
   proxyEnvironmentForChild,
   proxyRouteFor,
+  type RequestFetch,
   type ProxyRoute,
 } from './install.ts'

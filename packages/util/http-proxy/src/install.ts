@@ -9,6 +9,7 @@
 
 import type { Dispatcher, Pool } from 'undici'
 import {
+  DIRECT_POLICY,
   isSupportedProxyUrl,
   POLICY_ENV_NAMES,
   PROXY_ENV_NAMES,
@@ -140,20 +141,66 @@ function writeProxyEnv(values: Readonly<Record<string, string | undefined>>): ()
  * @param policy - the policy to route by; it must proxy at least one scheme.
  * @returns the dispatcher to install, owning every per-origin agent its factory created.
  */
-async function createPolicyDispatcher(policy: ProxyPolicy): Promise<Dispatcher> {
+async function createPolicyDispatcher(
+  policy: ProxyPolicy,
+  timeouts: { readonly headersTimeout: number; readonly bodyTimeout: number } | undefined = undefined,
+): Promise<Dispatcher> {
   const { Agent, Pool, ProxyAgent } = await import('undici')
   return new Agent({
+    ...timeouts === undefined ? {} : timeouts,
     factory(origin, options) {
       // undici declares this parameter as `Object`, discarding the pool options it actually passes.
       const passed = options as Pool.Options
+      // Agent options configure its own dispatch lifecycle, but a custom factory owns the Pool or
+      // ProxyAgent that ultimately reads the response. Copy request-local deadlines into that child
+      // explicitly instead of leaving it on Undici's five-minute defaults.
+      const childOptions = { ...passed, ...timeouts === undefined ? {} : timeouts }
       const proxy = proxyForUrl(policy, new URL(origin.toString()))
-      if (proxy !== undefined) return new ProxyAgent({ ...passed, uri: proxy })
+      if (proxy !== undefined) return new ProxyAgent({ ...childOptions, uri: proxy })
       // What undici's own default factory builds for these options, which `factory` replaces
       // wholesale. It reaches for a bare `Client` only at `connections: 1`, an option this
       // dispatcher never carries: it is constructed with undici's defaults.
-      return new Pool(origin, passed)
+      return new Pool(origin, childOptions)
     },
   })
+}
+
+/**
+ * One request-scoped fetch implementation and the dispatcher that owns its connections.
+ *
+ * Callers close this only after their request settles. It snapshots the active proxy policy when it
+ * is created, so it neither changes the process-wide dispatcher nor bypasses the proxy policy while
+ * carrying timeouts that the global dispatcher cannot hold.
+ */
+export interface RequestFetch {
+  /** Fetch wired to this request's proxy-aware dispatcher. */
+  readonly fetch: typeof globalThis.fetch
+  /** Destroy the request dispatcher after its consumer finishes or aborts. */
+  close(): Promise<void>
+}
+
+/**
+ * Create a proxy-aware fetch with request-local undici header and body timeouts.
+ *
+ * @param timeouts - the maximum wait for response headers and for the next response-body data.
+ * @returns a fetch function plus the close operation that releases its request-local dispatcher.
+ */
+export async function createRequestFetch(
+  timeouts: { readonly headersTimeout: number; readonly bodyTimeout: number },
+): Promise<RequestFetch> {
+  // Capture one immutable policy before the asynchronous imports. A later profile unload may replace
+  // the global dispatcher, but cannot redirect this already-created request between a routing choice
+  // and its fetch call.
+  const policy = active ?? DIRECT_POLICY
+  const [undici, dispatcher] = await Promise.all([
+    import('undici'),
+    createPolicyDispatcher(policy, timeouts),
+  ])
+  const fetch = (input: Parameters<typeof undici.fetch>[0], init?: Parameters<typeof undici.fetch>[1]) => undici.fetch(input, { ...init, dispatcher })
+  return {
+    fetch: fetch as typeof globalThis.fetch,
+    close: async () => { await dispatcher.destroy() },
+  }
 }
 
 /**

@@ -86,9 +86,13 @@ kind: "package-reference"
 | `requestImagePixelBudget` | `4,194,304` | 每张确定性请求图片的总像素预算 |
 | `requestImageMaxBytes` | `1 MiB` | 每张请求图片在 base64 扩展前的编码字节目标 |
 | `maxRequestImageBytes` | `20 MiB` | base64 图片载荷总上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败 |
+| `timeoutMs` | 无 | SDK 超时与等待响应头的最长时间；设置后适配器向 pi-ai 传入具有相同请求头超时的请求级 fetch |
+| `streamIdleTimeoutMs` | `300,000` ms | 提供方流数据之间允许的最大空闲时间；设置 `timeoutMs` 时也作为请求级 fetch 的响应体超时 |
 | `retryPolicy` | normal，5 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-pi-ai)是每个受支持字段及其 JSDoc 的穷尽式真源。
+
+长提示词预填充时，将 `timeoutMs` 设为不小于预计等待首个响应头的时间。设置该值也会覆盖 Undici 的默认响应头期限，使适配器与 socket transport 共享同一请求预算。请求保留 profile 的代理策略，并在流结束或停止时关闭私有 dispatcher。
 
 ### 登录提供方
 
